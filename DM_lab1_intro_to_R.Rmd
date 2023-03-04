@@ -1,0 +1,605 @@
+---
+title: "Data Mining course 2022/2023"
+subtitle: "Lab1 - a short introduction to R (with examples)"
+author: Andrzej Janusz
+email: ap.janusz@uw.edu.pl
+output:
+  html_notebook:
+    df_print: paged
+    fig_height: 8
+    fig_width: 10
+    rows.print: 10
+  html_document:
+    df_print: paged
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE, results=FALSE}
+# list of libraries used in this script
+library(data.table)
+library(microbenchmark)
+
+```
+
+### The plan:
+
+0.  Organizational matters.
+1.  Using *help*.
+2.  Operations on numbers, vectors, and matrices.
+3.  Basic data types and classes.
+4.  Vector/matrix indexing methods.
+5.  Basic statistics.
+6.  Basic programming constructs.
+7.  Function definition, passing parameters.
+
+### Work organization and assessment rules
+
+We will use Moodle:
+<https://moodle.mimuw.edu.pl/course/view.php?id=1767> The registration
+key: 0!41UWrl
+
+To pass the laboratories, you will have to get a sufficient number of
+points. You will receive points for:
+
+-   *active* participation in classes (up to $10$ points),
+-   points for solving two projects (up to $2 \times 25 = 50$ points).
+
+Additional points can be awarded for solving additional tasks (not
+mandatory) or for active participation in a data mining competition (up
+to 20 points). Exemplary (currently ongoing) challenge:
+<https://knowledgepit.ai/icme-2023-grand-challenge/>
+
+The total number of collected points from laboratories can not exceed
+60. Points collected during the laboratories will influence the final
+grade (together with points from the exam).
+
+### Useful links:
+
+R project web page:\
+<http://www.r-project.org/>
+
+Resources for learning R:
+
+-   *Introduction to R*\
+    <http://cran.r-project.org/doc/manuals/R-intro.html>
+-   *R Language* reference manual\
+    <http://cran.r-project.org/doc/manuals/R-lang.html>
+-   A nice tutorial to the *data.table* package\
+    <https://cran.r-project.org/web/packages/data.table/vignettes/datatable-intro.html>
+
+```{r help, eval= FALSE}
+# you start R by typing
+R
+
+# and you end an R session with
+q()
+
+# you can read manual to a specific function by typing a question mark '?' before its name
+?q
+
+# you can also browse manuals of all installed R functions and libraries by typing
+help.start()
+```
+
+### Arithmetics:
+
+```{r vectors, eval = FALSE}
+# but you need to remember that in R even a single number is a vector...
+is(1)
+
+# so, vector arithmetics is the same as the arithmetics on numbers
+c(1,2,3,4,5) # - this is a concatenation of five vectors...
+(1:10) - 1
+(1:10) * 2
+2^(1:10)
+(1:10)^2
+log(1:10)
+(1:10)*(10:1)
+
+# some methods of defining simple vectors
+1:10
+rep(1, 10)
+rep(1:2, 5)
+rep(1:2, each = 5)
+
+seq(1,10,by=1)
+seq(5,10,length.out = 10)
+rep(1:5, seq(2,10, by=2))
+
+# defining 'empty' vectors:
+integer(0)
+character(10)
+numeric(10)
+```
+
+```{r matrices, eval = FALSE}
+# methods of creating matrices
+1:10 %*% 10:1
+1:10 %*% t(1:10)
+
+matrix(1:100, nrow = 10, ncol = 10)
+matrix(1:100, nrow = 10, byrow=TRUE)
+matrix(rep(1:5, seq(2,10, by=2)), nrow = 10)
+
+diag(1:10)
+diag(1:10 %*% t(1:10))
+
+# in R, a matrix is also a vector
+myMatrix = matrix(c(1,2,3,3,2,1,1,2,1), nrow = 3, byrow=TRUE)
+myMatrix
+is(myMatrix)
+
+# simple arithmetics:
+myMatrix * myMatrix
+myMatrix + 1
+myMatrix + 1:3
+myMatrix * 2
+myMatrix * 1:3
+
+solve(myMatrix)
+solve(myMatrix, c(2,3,1))
+myMatrix %*% solve(myMatrix, c(2,3,1))
+```
+
+### Operators and functions
+
+```{r operators, eval = FALSE}
+# comparison operators: <, <=, >, >=, ==, !=
+1 < 2
+1:10 > 5
+1:10 == c(1:3, 6:4, 7:10)
+
+# various types of assignment operators =, <-, <<-, ->, ->>
+x = 4
+y <- 5
+6 -> z
+c(x, y, z)
+
+'='(z, 1)
+z
+
+# small differences between '=' and '<-' operators
+x; mean(1:10); x
+
+mean(x = 1:10); x
+
+mean(x <- 1:10); x
+
+# mean(abc = 1:10) would be an error (check it), but
+mean(abc <- 1:10) # what happens here?
+abc
+
+# some more advanced example
+new_counter <- function() {
+  i <- 0
+  function() {
+    # here you can add some important piece of code for which you want to count executions
+    i <<- i + 1 # double arrow looks at the env 'one up', each function has its own enviroment
+    i
+  }
+}
+
+i <- 10
+
+counter_one <- new_counter()
+counter_two <- new_counter()
+
+counter_one() 
+counter_one()
+
+counter_two()
+
+i
+
+# second example (as a warning)
+test <- function() {
+  mySum <- 0
+  for (i in c(1, 2, 3)) { # for doesn't change the enviroment, so the mySum is from outside
+    mySum <<- mySum + i 
+  }
+  mySum
+}
+
+test()
+
+mySum # what happened here?
+
+# logical operators !, &, |, &&, ||, xor(), any(), all(), which()
+x = 2 > 1
+x & 3 < 4
+!x | 5^5 > 5*5
+xor(x, 5^5 > 5*5)
+any(1:10 > 5)
+all(1:10 > 5)
+which(1:10 != c(1:3, 6:4, 7:10))
+```
+
+### Atomic data types and basic data structures
+
+```{r data_types, eval = FALSE}
+# in R, atomic data types are: logical, integer, numeric, complex, character, raw
+# basic data structures: vectors and lists
+
+# classes of R objects
+class(1:10)
+is(1:10)
+is(as.numeric(1:10))
+class("abc")
+
+# dynamic typing in R
+class(1:3)
+x = c(1:3, 4.5)
+class(x)
+x[7] = "d"
+x
+class(x)
+
+y = 1234
+as.character(y)
+
+# naming elements of vectors
+names(x)
+names(x) = c("a", "b", "c", "D", "", "", "X")
+names(x)
+
+x[2]
+x["X"]
+x["bleble"]
+
+# factors in R
+myFactor = factor(rep(c("A", "B"), 5), levels = c("A", "B", "C"))
+is(myFactor)
+levels(myFactor)
+as.integer(myFactor)
+as.character(myFactor)
+```
+
+```{r lists_and_frames, eval = FALSE}
+# creating a list
+myList = list(vector = x, label = y)
+myList
+
+myList$vector
+myList$vec
+myList$v
+myList[[2]] # chooses the second element
+myList[2]   # chooses a list that stores the second element
+class(myList[[2]])
+class(myList[2])
+
+# data frames are the basic data storage in R (not the most efficient)
+myDataFrame = data.frame(0)
+myDataFrame = as.data.frame(myMatrix)
+is(myDataFrame)
+as.list(myDataFrame)
+
+# you can get a list of all exemplary data frames available in loaded libraries by typing 'data()'
+myDataFrame = iris
+head(myDataFrame)
+dim(myDataFrame)
+nrow(myDataFrame)
+ncol(myDataFrame)
+colnames(myDataFrame)
+
+# adding columns and rows
+myDataFrame = cbind(myDataFrame, myDataFrame[,1] * myDataFrame[,2] - 1)
+# you need to remember to check the column types
+myDataFrame = rbind(myDataFrame, myDataFrame[1:3,])
+```
+
+```{r indexing, eval = FALSE}
+# in R, you can index data using vectors of integers (indexes), logical values, names or expressions
+myVector = seq(100, 0, -2)
+myVector[26:35]
+myVector[1:length(myVector) %in% 26:35]
+
+# modifying vectors
+mySecondVector = character(length(myVector))
+mySecondVector[myVector %% 4 == 0] = "class1"
+mySecondVector[mySecondVector != "class1"] = "class2"
+head(mySecondVector)
+
+# indexes do not need to be unique
+myDataFrame[c(1,1,2,3,1,1,2),]
+```
+
+### Some basic programming constructs
+
+```{r statistics, eval = FALSE}
+# in R, you can find ready-to-use implementations of many types functions commonly used in statistics
+# for example: abs, sum, min, max, pmin, pmax, quantile, median, prod, mean, rank, order, sort, ....
+myVector  = seq(10, 1, length.out = 7)
+sum(myVector)
+min(myVector)
+rank(myVector)
+mean(myVector)
+sort(myVector)
+max(myVector, sort(myVector))
+pmax(myVector, sort(myVector))
+```
+
+```{r applys, eval = FALSE}
+# a method to iterate over various data structures - 'apply' functions
+apply(myDataFrame[1:4], 1, sum)
+apply(myDataFrame[1:4], 2, mean)
+
+sapply(myDataFrame[1:4], mean)
+lapply(myDataFrame[1:4], median)
+
+# there are many other versions of *apply functions, each dedicated to a different data type
+```
+
+```{r conds, eval = FALSE}
+# conditional instructions:
+if(_condition_) {}
+else {}
+```
+
+```{r conds_cd, eval = FALSE}
+if(mean(myDataFrame$Sepal.L) > min(myDataFrame$Sepal.W)) {
+  print("L > W") 
+} else {
+  print("L <= W")
+}
+```
+
+```{r loops, eval = FALSE}
+# loops - use them only if it is really necessary
+
+# 'for' loop:
+for(name in _expression1_) {_expression2_}
+
+# 'while' loop:
+while(_condition_) {_expression_}
+
+# 'infinite' loop: 
+repeat _expression_
+```
+
+```{r functions}
+# definition of functions:
+myFunction = function(x, y, f, w = 0, ...) { # this ... parameter is really interesting...
+    f(x^2 - y^2 + w, ...)
+}
+
+myFunction(3,2, function(x, a = 0) x + a)
+
+myFunction(3,2, function(x, a = 0) x + a, a = 100)
+
+# recursion:
+multiply = function(x,y,w = 0)  {
+  if(y==0) w 
+  else multiply(x, y-1 ,w+x)
+}
+
+multiply(4,5)
+
+```
+
+### Data reading and writing
+
+There are plenty tools for I/O opperations in R.
+
+```{r data_read_write, eval = FALSE}
+# Predefined data sets in loaded R libraries:
+data()                # the list of currently available data sets
+
+# a simple data editor:
+fix(myData) # do not use it on large data sets!
+# a simple data viewer:
+View(myData)
+
+# R has tools for importing and exporting data from majority of popular data formats 
+# http://cran.r-project.org/doc/manuals/R-data.pdf
+
+# basic functions to read the data:
+?scan
+?read.table
+?readLines
+?data.table::fread
+
+# tools for importing data from other popular data exploration systems (e.g., EpiInfo, Minitab, S-PLUS, SAS, SPSS, Stata, Systat)
+# in the "foreign" library
+
+# APIs to various data bases: e.g., libraries RMySQL, ROracle, RPostgreSQL, RSQLite
+
+# writing matrices/data frames/data tables to files
+write.table(myData, file = "iris1.data", sep="\t", col.names=TRUE, row.names=FALSE)
+write.csv(myData, file = "iris2.data")
+write.csv2(myData, file = "iris3.data")
+
+# writing data to binary (compressed) files for fast read/write:
+save(myData, iris, file = "someData.RData") # it can be used to serialize a pre-trained model
+save.image(file = "allData.RData")
+
+# clearing memory
+rm(myData)
+gc()       # you can also run the garbage collector manually
+
+# loading binary files
+load(file = "someData.RData")
+```
+
+### Using the data.table package
+
+The *data.table* package powerful tools for in-memory processing of
+large data sets.
+
+```{r data_read, echo=FALSE, warning=FALSE, message=FALSE}
+# some very useful libraries:
+library(parallel)
+library(data.table)
+library(dplyr)
+library(tidyr)
+
+# typically, we load all libraries in the setup section of the notebook
+
+# A part of the data.table tutorial from the package's vignettes:
+# data reading
+input <- if (file.exists("flights14.csv")) {
+   "flights14.csv"
+} else {
+  "https://raw.githubusercontent.com/Rdatatable/data.table/master/vignettes/flights14.csv"
+}
+flights <- fread(input)
+
+# we save the csv file so we don't need to download it again
+fwrite(flights, file = "flights14.csv")
+```
+
+```{r data_processing_examples}
+head(flights)
+
+tracemem(flights)
+# fast data querying:
+microbenchmark::microbenchmark(
+  ans <- flights[origin == "JFK" & month == 6L]
+)
+head(ans)
+
+microbenchmark::microbenchmark(
+  ans2 <- flights[order(origin, -dest)]
+)
+head(ans2)
+
+# subsetting and aggregating
+microbenchmark::microbenchmark(
+  ans3 <- flights[origin == "JFK" & month == 6L,
+                  .(m_arr = mean(arr_delay), m_dep = mean(dep_delay))]
+)
+ans3
+
+# you can efficiently run 'group by' queries:
+microbenchmark::microbenchmark(
+  ans4 <- flights[carrier == "AA",
+                  list(mean(arr_delay), mean(dep_delay)),
+                  keyby = .(origin, dest, month)]
+)
+ans4
+
+# applying aggregations to multiple columns
+microbenchmark::microbenchmark(
+  ans5 <- flights[carrier == "AA",                       ## Only on trips with carrier "AA"
+                  lapply(.SD, mean),                     ## compute the mean
+                  by = .(origin, dest, month),           ## for every 'origin,dest,month'
+                  .SDcols = c("arr_delay", "dep_delay")] ## for just those specified in .SDcols
+)
+ans5
+```
+
+```{r dplyr_vs_data.table}
+# a quick comparison with dplyr (from tidyverse)
+flights <- as_tibble(flights) # we convert our data.table to a tibble to make things eraser for dplyr
+is(flights)
+
+microbenchmark::microbenchmark(
+  ans <- filter(flights,
+                (origin == "JFK") & (month == 6L))
+)
+head(ans)
+```
+
+```{r dplyr_vs_data.table_cd, message=FALSE}
+# we may turn the memory-reporting off to negate its impact
+untracemem(flights)
+microbenchmark::microbenchmark(
+  ans <- filter(flights,
+                (origin == "JFK") & (month == 6L))
+)
+
+# now, a 'group by' query
+microbenchmark::microbenchmark(
+  ans4 <- flights %>%
+          filter(carrier == "AA") %>%
+          group_by(origin, dest, month) %>%
+          summarise(mean_arr_delay = mean(arr_delay), mean_dep_delay = mean(dep_delay))
+)
+ans4
+```
+
+### Exercises
+
+```{r task1}
+# Example 1:
+vec1 <- rnorm(10000000)
+vec2 <- rnorm(10000000)
+vec3 <- numeric(10000000)
+
+rep_num <- 5
+
+# compare execution times of multiplying in a loop and using vectors
+microbenchmark::microbenchmark(
+  {
+    for(i in 1:length(vec1)) vec3[i] <- vec1[i] * vec2[i]
+  },
+  times = rep_num
+)
+print(sum(vec3))
+
+microbenchmark::microbenchmark(
+  {
+    vec3 <- vec1 * vec2
+  },
+  times = rep_num
+)
+print(sum(vec3))
+```
+
+```{r task2}
+# Example 2: for a given numeric matrix or a data.frame compute a difference between 
+# the largest and the smallest element in each column, without using a loop.
+DT <- iris
+
+max_min_diff <- function(vec) max(vec) - min(vec)
+
+sapply(DT[, 1:4], max_min_diff)
+```
+
+```{r task3}
+# Example 3:
+dim(iris)
+DT <- data.table::rbindlist(replicate(1000000, iris, simplify = FALSE))
+
+is(DT)
+dim(DT)
+object.size(DT)
+
+colnames(DT)
+
+system.time({
+  print(DT[, list(mean.Sepal.Length = mean(Sepal.Length),
+                  mean.Sepal.Width = mean(Sepal.Width)), 
+           by = Species])
+})
+
+data.table::setkey(DT, 'Species')
+system.time({
+  print(DT[, list(mean.Sepal.Length = mean(Sepal.Length),
+                  mean.Sepal.Width = mean(Sepal.Width)), 
+           by = Species])
+})
+
+rm(DT)
+```
+
+**Exercise 1:** You have a numeric vector of length 1000000. Compute
+sums of each three consecutive elements of this vector:\
+\* using a *for* loop \* without any loop (in a vectorized manner)\
+Compare the execution times.
+
+**Exercise 2:** You have a list of size 1000. Each element of that list
+is a numeric vector of length 100. Convert this list into a 1000 x 100
+matrix:\
+\* using a *for* loop and the *rbind* function\
+\* in a vectorized manner.\
+Compare the execution times.
+
+**Exercise 3:** Use the *data.table* package to compute dominant values
+for all symbolic (character) columns in the *Flights* data set.
+
+```{r the_end}
+# clearing the memory and manually running the garbage collector
+rm(list = ls()); gc()
+```
