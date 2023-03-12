@@ -1,0 +1,304 @@
+---
+title: "Data Mining course 2022/2023"
+subtitle: "Lab2 - an introduction to market basket analysis"
+author: Andrzej Janusz
+email: ap.janusz@uw.edu.pl
+output:
+  html_notebook:
+    df_print: paged
+    fig_height: 8
+    fig_width: 10
+    rows.print: 10
+  html_document:
+    df_print: paged
+---
+
+### The plan:
+
+1.  Transactional data/PoS data.
+2.  Mining frequent itemsets, **apriori** and **aprioriTID** algorithms.
+
+```{r setup, include=FALSE, results=FALSE}
+library(data.table)
+library(arules)
+
+# definitions of some auxiliary functions:
+
+# a function which removes non-freqent itemsets from a transaction
+# it gets as an input a vector of itemsets (a transaction) and a vector itemsets to remove
+filterItems = function(itemSet, itemsToRm)  {
+  if(length(itemsToRm) > 0) {
+    idxToRm = which(itemSet %in% itemsToRm)
+    if(length(idxToRm) > 0) itemSet = itemSet[-idxToRm]
+  }
+  return(itemSet)
+}
+
+# a function which removes empty transactions from a list
+removeEmptyTrans = function(transactionList) {
+  if(length(transactionList) > 0)  {
+    transToRm = which(sapply(transactionList, length) < 1)
+    if(length(transToRm) > 0) transactionList = transactionList[-transToRm]
+  }
+  return(transactionList)
+}
+
+# a function which creates candidates for frequent itemsets size N+1 from frequent itemsets size N
+# (we investigate lexically sorted itemsets and marge those with matchig prefixes of size N-1)
+# as an input, this function gets a vector of itemsets
+createCandidates = function(freqItemSets)  {
+  candidatesSet = list()
+  if(length(freqItemSets) > 1) {
+    tmpItems = strsplit(freqItemSets, "_")
+    if(length(tmpItems[[1]]) > 1) {
+      itemPrefixes = sapply(tmpItems, function(x) paste(x[1:(length(x)-1)], collapse = "_"))
+      itemSurfixes = sapply(tmpItems, function(x) x[length(x)])
+      i = 1
+      while(i < length(tmpItems)) {
+        tmpPrefix = itemPrefixes[i]
+        tmpSurfix = itemSurfixes[i]
+        j = i + 1
+        while(j <= length(tmpItems) && tmpPrefix == itemPrefixes[j]) {
+          candidatesSet[[length(candidatesSet) + 1]] = paste(freqItemSets[i], 
+                                                             itemSurfixes[j], sep = "_")
+          j = j + 1
+        }
+        i = i + 1
+      }
+    } else {
+      for(i in 1:(length(freqItemSets)-1)) {
+        tmpCandidate = freqItemSets[i]
+        for(j in (i+1):length(freqItemSets)) {
+          if(freqItemSets[j] != freqItemSets[i]) {
+            candidatesSet[[length(candidatesSet) + 1]] = paste(freqItemSets[i], 
+                                                               freqItemSets[j], sep = "_")
+          }
+        }
+      }
+    }
+  }
+  
+  if(length(candidatesSet) > 0) {
+    candidatesSet = unique(unlist(candidatesSet))
+    candidatesSet = candidatesSet[order(candidatesSet)]
+  }
+  return(candidatesSet)
+}
+
+# a function which eliminates non-frequent itemsets using the "aprori rule"
+# (i.e. every subset of a frequent itemset must be frequent)
+# as an input, this function gets a single candidating itemset and a list of 
+# shorter frequent itemsets
+aprioriEliminate = function(itemSet, freqItemSets)  {
+  itemsVec = strsplit(itemSet, "_")[[1]]
+  N = length(itemsVec)
+  eliminateFlag = FALSE
+  i = 1
+  while(!eliminateFlag & i <= N) {
+    if(!(paste(itemsVec[-i], collapse="_") %in% freqItemSets)) eliminateFlag = TRUE
+    i = i + 1
+  }
+  return(eliminateFlag)
+}
+# the end of definitions of auxilary functions
+
+```
+
+### Exemplary PoS data
+
+PoS stands for *Point of Sale*. Such a data format is standard in the retail business. Apart from information regarding the *items* that took part in a *transaction*, it may store additional data related to a given transaction, e.g., *customer id*, *item price*, *item category*.
+
+URL to download some exemplary PoS data:\
+<https://drive.google.com/file/d/1E4dTWUNej5t5JbX66jE1_bjC2NAfr3sG/view?usp=sharing>
+
+```{r exemplary_data}
+# reading exemplary PoS data in the long format
+posData = data.table::fread("sample_pos_data.csv", header = TRUE)
+
+head(posData)
+
+# some data values are missing (a typical case):
+sapply(posData, function(x) mean(is.na(x)))
+
+# there are 1000 transactions in the data:
+posData[, uniqueN(transactionID)]
+
+# a distribution of basket sizes:
+posData[, list(basket_size = .N), by = transactionID][, summary(basket_size)]
+
+# take a moment to play with your data...
+posData[, uniqueN(productID)]
+
+```
+
+### Apriori and AprioriTID algorithms
+
+Today, we will use data in a different format - *item baskets*. Data in this format is usually a list of *itemsets*. Some additional information may also be associated with each 'basket'. All auxiliary functions were defined in the *setup* code chunk.
+
+```{r basket_data}
+# The Epub data set contains the download history of documents from the electronic publication
+# platform of the Vienna University of Economics and Business Administration.
+data(Epub, package = 'arules')
+
+# this data is already in the "transactions" format
+is(Epub)
+
+# some basic data info
+summary(Epub)
+
+# 10 first transactions:
+inspect(head(Epub, 10))
+
+# we can easily convert transactions into a list
+rawItemSets = as(Epub, "list")
+length(rawItemSets)
+class(rawItemSets)
+
+head(rawItemSets)
+# let's simplify the IDs
+rawItemSets = lapply(rawItemSets, 
+                     function(ids) gsub("doc[_]", "", ids))
+head(rawItemSets)
+```
+
+To demonstrate how the AprioriTID algorithm works, we can analyze a simple implementation that uses a list of baskets as an input.
+
+```{r first_run}
+# AprioriTID algorithm:
+nOfTransactions = length(rawItemSets)
+supportThreshold = 0.001   # for us, interesting itemsets have support > supportThreshold
+# in practice, this value depends on a particular application and data (usually between 0.1% and 1%)
+
+# first, we need to compute supports of individual items:
+rawItemSets = lapply(rawItemSets, 
+                     function(basket) sort(unique(basket)))
+candidateItemSets = sort(unique(unlist(rawItemSets, use.names = FALSE)))
+freqVec = table(unlist(rawItemSets))/nOfTransactions
+
+head(freqVec, 10)
+
+# in the TID version of apriori we store a copy of entire transaction database!
+itemSets = rawItemSets
+
+# filtering out items which are not frequent:
+if(any(freqVec < supportThreshold)) {
+  frequencyEliminatedItemSets = candidateItemSets[freqVec < supportThreshold]
+  
+  itemSets = lapply(itemSets, filterItems, frequencyEliminatedItemSets)
+  freqVec = freqVec[-which(names(freqVec) %in% frequencyEliminatedItemSets)]
+}
+
+# we may check how our transactions were changed:
+tmp = which(mapply(function(x,y) length(x) != length(y) & length(y) > 1, 
+                   rawItemSets, itemSets))[1:3]
+rawItemSets[tmp]
+itemSets[tmp]
+rm(frequencyEliminatedItemSets, tmp)
+
+# we add the frequent items as size 1 frequent itemsets to the output
+frequentItemSets = as.list(names(freqVec))
+
+system.time({
+# to find itemsets of size 2 and more:
+endFlag = FALSE
+while(!endFlag) {
+  # we construct candidates for frequent itemsets of size N+1 (we use the apriori rule here!)
+  # in the TID version, we create candidates separately for each of the original transactions
+  # and we update the transaction list. In the classical apriori, only one set of candidates
+  # is created globally, from all smaller frequent itemsets (a much larger set)
+  itemSets = lapply(itemSets, createCandidates)
+  # classic apriori - not per transaction, but on all smaller frequent itemsets
+  
+  # some of the transactions may become empty - we remove them
+  itemSets = removeEmptyTrans(itemSets)
+  
+  # if there are still some transactions to process...
+  if(length(itemSets) > 0) {
+    # we create a list of candidates for new frequent itemsets
+    candidateItemSets = sort(unique(unlist(itemSets)))
+
+    # we eliminate non-frequent itemsets using the apriori rule
+    aprioriEliminatedIdx = sapply(candidateItemSets, aprioriEliminate, names(freqVec))
+    if(any(aprioriEliminatedIdx)) 
+      itemSets = lapply(itemSets, filterItems, candidateItemSets[aprioriEliminatedIdx])
+    itemSets = removeEmptyTrans(itemSets)
+    rm(aprioriEliminatedIdx)
+    
+    # now, we finally count occurrences of candidating itemsets and eliminate those which are non-frequent
+    # we also need to update our transaction list
+    newFreqVec = table(unlist(itemSets))/nOfTransactions
+    #classic apriori - we don't create candidates in transaction, so we need a function to check if a subset is in a transaction
+    
+    if(length(newFreqVec) > 0)  {
+      frequencyEliminatedIdx = (newFreqVec < supportThreshold)
+      if(any(frequencyEliminatedIdx)) {
+        frequencyEliminatedItemSets = names(newFreqVec)[frequencyEliminatedIdx]
+        itemSets = lapply(itemSets, filterItems, frequencyEliminatedItemSets)
+        itemSets = removeEmptyTrans(itemSets)
+        newFreqVec = newFreqVec[!(names(newFreqVec) %chin% frequencyEliminatedItemSets)]
+        rm(frequencyEliminatedItemSets)
+      }
+      rm(frequencyEliminatedIdx)
+    }
+    
+    freqVec = newFreqVec
+    # we add the new itemsets to the output
+    if(length(freqVec) > 0) {
+      frequentItemSets = c(frequentItemSets, as.list(names(freqVec)))
+      cat('Frequent itemsets:', names(freqVec)[1], 
+          'and more... (in total:', length(freqVec), ')\n')
+    } else {
+      endFlag = TRUE
+    }
+  } else {
+    endFlag = TRUE
+  }
+}
+})
+
+frequentItemSets = lapply(strsplit(unlist(frequentItemSets), "_"),
+                          function(itemset) paste0("doc_", itemset))
+# the final set of the largest frequent itemsets:
+frequentItemSets[sapply(frequentItemSets, length) == 3]
+
+```
+
+**Exercise:**\
+What would be the differences between this implementation and the classical *apriori* algorithm?\
+As an excersise, please implement the classical version based on the code above, compare the results and computation times.
+
+```{r}
+nOfTransactions = length(rawItemSets)
+supportThreshold = 0.001 
+
+candidateFreq = function(candidates, transactions) {
+  sapply(candidates, 
+         function(c, transaction) sum (sapply(transactions, function(t) all(x %in% t))))
+}
+
+# first, we need to compute supports of individual items:
+rawItemSets = lapply(rawItemSets, 
+                     function(basket) sort(unique(basket)))
+candidateItemSets = sort(unique(unlist(rawItemSets, use.names = FALSE)))
+freqVec = table(unlist(rawItemSets))/nOfTransactions
+
+head(freqVec, 10)
+
+frequentItemSets = as.list(names(freqVec))
+
+if (any(freqVec < supportThreshold)) {
+  frequencyEliminatedItemSets = candidateItemSets[freqVec < supportThreshold]
+  freqVec = freqVec[-which(names(freqVec) %in% frequencyEliminatedItemSets)]
+}
+
+system.time({
+  endFlag = FALSE
+  while(!endFlag) {
+    newCandidateItemSets= createCandidates(ca)
+  }
+})
+```
+
+\
+\
+\
